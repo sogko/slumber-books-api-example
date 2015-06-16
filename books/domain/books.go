@@ -1,4 +1,4 @@
-package domain
+package books
 
 import (
 	"gopkg.in/mgo.v2/bson"
@@ -24,8 +24,8 @@ type NewBook struct {
 	Format      BookFormat `json:"format,omitempty" bson:"format"`
 }
 
-// Update Book struct
-type UpdateBook NewBook
+// Change Update Book struct
+type ChangeBook NewBook
 
 // Book model struct
 type Book struct {

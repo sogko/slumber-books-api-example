@@ -3,17 +3,15 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
-
-	// import server packages
-	serverMiddlewares "github.com/sogko/slumber/middlewares"
-	"github.com/sogko/slumber/server"
-	"github.com/sogko/slumber/sessions"
-	"github.com/sogko/slumber/users"
-
-	// import our project packages
 	"github.com/sogko/slumber-books-api-example/books"
 	"github.com/sogko/slumber-books-api-example/hooks"
+	"github.com/sogko/slumber-sessions"
+	"github.com/sogko/slumber-users"
+	"github.com/sogko/slumber/middlewares/context"
+	"github.com/sogko/slumber/middlewares/mongodb"
+	"github.com/sogko/slumber/middlewares/renderer"
+	"github.com/sogko/slumber/server"
+	"io/ioutil"
 	"time"
 )
 
@@ -30,40 +28,67 @@ func main() {
 		panic(errors.New(fmt.Sprintf("Error loading public signing key: %v", err.Error())))
 	}
 
-	// load and merge routes
-	routes := users.Routes.Append(&sessions.Routes, &books.Routes)
+	// create current project context
+	ctx := context.New()
 
-	// load and merge ACL maps
-	aclMap := users.ACL.Append(&sessions.ACL, &books.ACL)
+	// set up DB session
+	db := mongodb.New(&mongodb.Options{
+		ServerName:   "localhost",
+		DatabaseName: "slumber-books",
+	})
+	dbSession := db.NewSession()
 
-	// set server configuration
-	config := server.Config{
-		Database: &serverMiddlewares.MongoDBOptions{
-			ServerName:   "localhost",
-			DatabaseName: "slumber-books-example",
+	// set up Renderer (unrolled_render)
+	renderer := renderer.New(&renderer.Options{
+		IndentJSON: true,
+	}, renderer.JSON)
+
+	// set up users resource
+	usersResource := users.NewResource(ctx, &users.Options{
+		Renderer: renderer,
+		Database: db,
+		ControllerHooks: &users.ControllerHooks{
+			PostCreateUserHook: hooks.HandlerPostCreateUserHook,
 		},
-		Renderer: &serverMiddlewares.RendererOptions{
-			IndentJSON: true,
-		},
-		TokenAuthority: &serverMiddlewares.TokenAuthorityOptions{
-			PrivateSigningKey: privateSigningKey,
-			PublicSigningKey:  publicSigningKey,
-		},
-		Routes:          &routes,
-		ACLMap:          &aclMap,
-		ControllerHooks: &hooks.HooksMap,
-	}
+	})
 
-	// init server and run
-	s := server.NewServer(&config)
+	// set up sessions resource
+	sessionsResource := sessions.NewResource(ctx, &sessions.Options{
+		PrivateSigningKey:     privateSigningKey,
+		PublicSigningKey:      publicSigningKey,
+		Renderer:              renderer,
+		Database: db,
+		UserRepositoryFactory: usersResource.UserRepositoryFactory,
+	})
 
-	// you can add your own middlewares here
-	// and have it set up before routes are added to the router
+	// set up books resource
+	booksResource := books.NewResource(ctx, &books.Options{})
 
-	// setup route after middlewares
-	s.SetupRoutes()
+	// init server
+	s := server.NewServer(&server.Config{
+		Context: ctx,
+	})
+
+	// set up router
+	ac := server.NewAccessController(ctx, renderer)
+	router := server.NewRouter(s.Context, ac)
+
+	// add REST resources to router
+	router.AddResources(
+		usersResource,
+		sessionsResource,
+		booksResource,
+	)
+
+	// add middlewares
+	s.UseContextMiddleware(dbSession)
+	s.UseContextMiddleware(renderer)
+	s.UseMiddleware(sessionsResource.NewAuthenticator())
+	s.UseMiddleware(booksResource)
+
+	// setup router
+	s.UseRouter(router)
 
 	// bam!
-	gracefulTimeout := 5 * time.Second
-	s.Run(":3001", gracefulTimeout)
+	s.Run(":3001", 10*time.Second)
 }

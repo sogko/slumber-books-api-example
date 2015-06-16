@@ -1,10 +1,9 @@
-package repositories
+package books
 
 import (
 	"errors"
 	"fmt"
-	"github.com/sogko/slumber-books-api-example/domain"
-	serverDomain "github.com/sogko/slumber/domain"
+	"github.com/sogko/slumber/domain"
 	"gopkg.in/mgo.v2/bson"
 	"time"
 )
@@ -12,38 +11,42 @@ import (
 // Book collection name
 const BooksCollection string = "books"
 
-// Book repository
-type BookRepository struct {
-	DB serverDomain.IDatabase
+func NewBookRepository(db domain.IDatabase) *BookRepository {
+	return &BookRepository{db}
 }
 
-func (repo *BookRepository) CreateBook(book *domain.Book) error {
+// Book repository
+type BookRepository struct {
+	DB domain.IDatabase
+}
+
+func (repo *BookRepository) CreateBook(book *Book) error {
 	book.ID = bson.NewObjectId()
 	book.CreatedDate = time.Now()
 	book.LastModifiedDate = time.Now()
 	return repo.DB.Insert(BooksCollection, book)
 }
 
-func (repo *BookRepository) GetBooks() domain.Books {
-	books := domain.Books{}
+func (repo *BookRepository) GetBooks() Books {
+	books := Books{}
 	err := repo.DB.FindAll(BooksCollection, nil, &books, 50, "")
 	if err != nil {
-		return domain.Books{}
+		return Books{}
 	}
 	return books
 }
 
 func (repo *BookRepository) CountBooks(field string, query string) int {
-	q := serverDomain.Query{}
+	q := domain.Query{}
 	if query != "" {
 		if field != "" {
-			q[field] = serverDomain.Query{
+			q[field] = domain.Query{
 				"$regex":   fmt.Sprintf("^%v.*", query),
 				"$options": "i",
 			}
 		} else {
 			// if not field is specified, we do a text search on pre-defined text index
-			q["$text"] = serverDomain.Query{
+			q["$text"] = domain.Query{
 				"$search": query,
 			}
 		}
@@ -69,7 +72,7 @@ func (repo *BookRepository) DeleteBooks(ids []string) error {
 	if len(objectIds) == 0 {
 		return nil
 	}
-	err := repo.DB.RemoveAll(BooksCollection, serverDomain.Query{"_id": bson.M{"$in": objectIds}})
+	err := repo.DB.RemoveAll(BooksCollection, domain.Query{"_id": bson.M{"$in": objectIds}})
 	return err
 }
 
@@ -80,26 +83,26 @@ func (repo *BookRepository) DeleteAllBooks() error {
 }
 
 // GetBook Get book specified by the id
-func (repo *BookRepository) GetBookById(id string) (*domain.Book, error) {
+func (repo *BookRepository) GetBookById(id string) (*Book, error) {
 
 	if !bson.IsObjectIdHex(id) {
 		return nil, errors.New(fmt.Sprintf("Invalid ObjectId: `%v`", id))
 	}
 
-	var book domain.Book
-	err := repo.DB.FindOne(BooksCollection, serverDomain.Query{"_id": bson.ObjectIdHex(id)}, &book)
+	var book Book
+	err := repo.DB.FindOne(BooksCollection, domain.Query{"_id": bson.ObjectIdHex(id)}, &book)
 	return &book, err
 }
 
 // UpdateBookById Update book specified by the id
-func (repo *BookRepository) UpdateBook(id string, inBook *domain.UpdateBook) (*domain.Book, error) {
+func (repo *BookRepository) UpdateBook(id string, inBook *ChangeBook) (*Book, error) {
 
 	if !bson.IsObjectIdHex(id) {
 		return nil, errors.New(fmt.Sprintf("Invalid ObjectId: `%v`", id))
 	}
 
-	// serialize to a sub-set of allowed domain.Book fields to update
-	update := serverDomain.Query{
+	// serialize to a sub-set of allowed Book fields to update
+	update := domain.Query{
 		"lastModifiedDate": time.Now(),
 	}
 	if inBook.Author != "" {
@@ -117,12 +120,12 @@ func (repo *BookRepository) UpdateBook(id string, inBook *domain.UpdateBook) (*d
 	if inBook.Format != "" {
 		update["format"] = inBook.Format
 	}
-	query := serverDomain.Query{"_id": bson.ObjectIdHex(id)}
-	change := serverDomain.Change{
-		Update:    serverDomain.Query{"$set": update},
+	query := domain.Query{"_id": bson.ObjectIdHex(id)}
+	change := domain.Change{
+		Update:    domain.Query{"$set": update},
 		ReturnNew: true,
 	}
-	var changedBook domain.Book
+	var changedBook Book
 	err := repo.DB.Update(BooksCollection, query, change, &changedBook)
 	return &changedBook, err
 }
@@ -133,6 +136,6 @@ func (repo *BookRepository) DeleteBook(id string) error {
 	if !bson.IsObjectIdHex(id) {
 		return errors.New(fmt.Sprintf("Invalid ObjectId: `%v`", id))
 	}
-	err := repo.DB.RemoveOne(BooksCollection, serverDomain.Query{"_id": bson.ObjectIdHex(id)})
+	err := repo.DB.RemoveOne(BooksCollection, domain.Query{"_id": bson.ObjectIdHex(id)})
 	return err
 }
